@@ -69,6 +69,8 @@ type endlessServer struct {
 	sigChan          chan os.Signal
 	isChild          bool
 	state            uint8
+	stopChan         chan struct{}
+	chanLock         sync.RWMutex
 }
 
 /*
@@ -247,6 +249,18 @@ func (srv *endlessServer) ListenAndServeTLS(certFile, keyFile string) (err error
 	return srv.Serve()
 }
 
+// StopChan gets the stop channel which will block until
+// stopping has completed, at which point it is closed.
+// Callers should never close the stop channel.
+func (srv *endlessServer) StopChan() <-chan struct{} {
+	srv.chanLock.Lock()
+	if srv.stopChan == nil {
+		srv.stopChan = make(chan struct{})
+	}
+	srv.chanLock.Unlock()
+	return srv.stopChan
+}
+
 /*
 getListener either opens a new socket to listen on, or takes the acceptor socket
 it got passed when restarted.
@@ -355,6 +369,12 @@ func (srv *endlessServer) shutdown() {
 	} else {
 		log.Println(syscall.Getpid(), srv.EndlessListener.Addr(), "Listener closed.")
 	}
+	srv.chanLock.Lock()
+	if srv.stopChan != nil {
+		log.Println("Closing stopChan")
+		close(srv.stopChan)
+	}
+	srv.chanLock.Unlock()
 }
 
 /*
@@ -503,9 +523,9 @@ type endlessConn struct {
 }
 
 func (w endlessConn) Close() error {
-    err := w.Conn.Close()
-    if err == nil {
-        w.server.wg.Done()
-    }
-    return err
+	err := w.Conn.Close()
+	if err == nil {
+		w.server.wg.Done()
+	}
+	return err
 }
