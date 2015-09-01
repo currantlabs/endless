@@ -164,6 +164,12 @@ func (srv *endlessServer) Serve() (err error) {
 	defer log.Println(syscall.Getpid(), "Serve() returning...")
 	srv.state = STATE_RUNNING
 	err = srv.Server.Serve(srv.EndlessListener)
+	if opErr, ok := err.(*net.OpError); ok {
+		// This is hacky, but unfortunately the net package doesn't export errClosing
+		if strings.Contains(opErr.Error(), "use of closed network connection") {
+			err = nil
+		}
+	}
 	log.Println(syscall.Getpid(), "Waiting for connections to finish...")
 	srv.wg.Wait()
 	srv.state = STATE_TERMINATE
