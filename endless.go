@@ -64,6 +64,7 @@ type endlessServer struct {
 	http.Server
 	EndlessListener  net.Listener
 	SignalHooks      map[int]map[os.Signal][]func()
+	ParseProxyProtocol bool
 	tlsInnerListener *endlessListener
 	wg               sync.WaitGroup
 	sigChan          chan os.Signal
@@ -472,66 +473,4 @@ func (srv *endlessServer) fork() (err error) {
 	}
 
 	return
-}
-
-type endlessListener struct {
-	net.Listener
-	stopped bool
-	server  *endlessServer
-}
-
-func (el *endlessListener) Accept() (c net.Conn, err error) {
-	tc, err := el.Listener.(*net.TCPListener).AcceptTCP()
-	if err != nil {
-		return
-	}
-
-	tc.SetKeepAlive(true)                  // see http.tcpKeepAliveListener
-	tc.SetKeepAlivePeriod(3 * time.Minute) // see http.tcpKeepAliveListener
-
-	c = endlessConn{
-		Conn:   tc,
-		server: el.server,
-	}
-
-	el.server.wg.Add(1)
-	return
-}
-
-func newEndlessListener(l net.Listener, srv *endlessServer) (el *endlessListener) {
-	el = &endlessListener{
-		Listener: l,
-		server:   srv,
-	}
-
-	return
-}
-
-func (el *endlessListener) Close() error {
-	if el.stopped {
-		return syscall.EINVAL
-	}
-
-	el.stopped = true
-	return el.Listener.Close()
-}
-
-func (el *endlessListener) File() *os.File {
-	// returns a dup(2) - FD_CLOEXEC flag *not* set
-	tl := el.Listener.(*net.TCPListener)
-	fl, _ := tl.File()
-	return fl
-}
-
-type endlessConn struct {
-	net.Conn
-	server *endlessServer
-}
-
-func (w endlessConn) Close() error {
-	err := w.Conn.Close()
-	if err == nil {
-		w.server.wg.Done()
-	}
-	return err
 }
